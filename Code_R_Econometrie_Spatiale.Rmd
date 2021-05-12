@@ -1,0 +1,248 @@
+---
+title: "PROJET ECONOMETRIE SPATIALE"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r}
+library(foreign)
+library(rgdal)
+library(maptools)
+library(spdep)
+library(tmap)
+library(cartography)
+library(spatialreg)
+
+```
+
+
+# IMPORTARTION DES DONNEES
+```{r}
+setwd("C:/Users/mbowe/Desktop/M2_MIASHS/PROJET_ECONOMETRIE8SPATIALE")
+shp=readOGR("rosas1999.shp", layer = "rosas1999")
+shx=readOGR("rosas1999.shx")
+dbf=read.dbf("rosas1999.dbf")
+
+```
+########################################################################################## 
+                          Description des données du tableau 
+##########################################################################################
+
+
+```{r}
+plotclr <- c("blue", "green", "red", "black")
+plot(shp,col=shp$TOPO,border="grey")
+
+legend("topleft", legend = c("1(461)","2(368)" , "3(354) ","4(555) "), title = "TOPO",fill=plotclr,cex=0.8)
+
+```
+
+
+
+#CREATION DE LA VARIABLE Yields100
+```{r}
+shp$YIELDS100=(shp$YIELD)*100
+shp1=shp[,-13]
+
+```
+
+######################################################################################
+
+              ANALYSE EXPLOIRAOIRE DE DONNEES SPATIALE
+
+######################################################################################
+
+
+#1. Matrice de poids basée sur la contiguïté au sens de la reine à l’ordre 1 
+```{r}
+mbc=poly2nb(shp1,  queen=TRUE)
+mbc
+```
+
+Il y a 1738 parcerelles .On note qu’il n’y a que 0.4358673 % de liaisons entre pacerelles dans la matrice de contiguité ,ce qui signifie que celle -ci est vide à 99%. Par ailleurs on observe que chaque parcerelle a en moyenne 7.575374 pacerelles voisines. Si tous les parcerelles étaient reliés entre eux, le nombre total de liens serait 1738x1738 = 3020644. En réalité, on dénombre 13166 liens non nuls avec une pondération unforme(1/3020644).
+
+
+
+#2. Analyse et interprétation l’autocorrélation spatiale globale dans la variable YIELDS100 avec le test de I.moran global
+```{r}
+mbcs=nb2listw(mbc, style = "W") #Créa+on	d’une	matrice	de contiguité	standardisée(type	queen)	
+ 
+moran.test(shp1$YIELDS100, listw=mbcs,	alternative="two.sided", randomisation=FALSE)	
+moran.mc(shp1$YIELDS100, listw=mbcs,nsim = 1738)
+
+geary.test(shp1$YIELDS100, listw=mbcs,	alternative="two.sided")	
+```
+
+Le coefficient d'autocorrélation spatiale  de I Moran est égal à 0.7008644728 avec une p_value($2,2.10^{-16}$) inférieur au seuil de 10%,  donc l'hypothèse d'absence d'autocorrélétion spatiale H₀ est rejetée. Il existe bien une autocorrélation spatiale globale de la variable YIELDS100. De plus le coefficient de I Moran étant proche de 1, les données présentent une autocorrélation spatiale globale positive : les valeurs de YIELDS100 semblables ont tendance à se regrouper spatialement. 
+Le test de Geary confirme encore l'abscence d'autocorrélation spatiale globale.
+
+#3. Analyse de la présence d’autocorrélation spatiale locale dans la variable YIELDS100. Eﬀectuons l’analyse avec le test de I Moran locaux 
+```{r}
+nc=scale(shp1$YIELDS100)
+mbcsl=order(shp1$OBS	)	
+locm=localmoran(shp1$YIELDS100,mbcs,alternative = "two.sided", zero.policy=
+TRUE)	
+summary(locm)
+#pp=printCoefmat(data.frame(locm[mbcsl,],	row.names=shp1$name[mbcsl]),	check.names=FALSE)	
+#mean(pp[,1])
+
+par(mfrow=c(1,1), mar=c(4,4,2,2))
+moran.plot(shp1$YIELDS100,mbcs, main="Diagramme de Moran",xlab = "Observed",ylab="Lagged",col=c("red","blue"), labels = as.character(shp1$OBS) )
+
+```
+
+
+Il y'a 674 parcerelles voisines dont leurs coefficients de Moran locaux ont une p_value inférieur au seuil de 5%. On ne rejette pas l'hypothèse d'abscence de corrélation spatiale locale de la variable YIELDS100. Il exise bien une dépendance spatiale entre les valeurs emblables de la variable YIELDS100 de ces voisins. 
+De plus nous constatons d'après le diagramme de I Moran tout les valeurs voisines semblent à ce regrouper dans les deux quadrants Low-Low et High-High.
+
+
+
+#4. Analyse d’autocorrélation spatiale locale dans la variable YIELDS100 à l’aide des statistiques de Getis locales (Local G). 
+
+```{r}
+LG=localG(shp1$YIELDS100,mbcs)
+summary(LG)
+```
+
+######################################################################################
+
+######            ECONOMETRIE SPATIALE     ##############
+
+######################################################################################
+
+### 1°) Construction de la spéciﬁcation économétrique présentée en (1)
+
+$YIELDS100=\beta_{0}+\beta_{1}N+\beta_{2}N2+\beta_{3}TOP2+\beta_{4}TOP3+\beta_{5}TOP4+\epsilon$
+
+```{r}
+MLS=lm(YIELDS100~N+N2+TOP2+TOP3+TOP4, data = shp1)
+summary(MLS)
+```
+
+Le modèle linéaire classique semble etre globalement significatif car p_value de la statistique dLR est inférieur à 5%. On constate aussi que toutes les variables semblent avoir un un effet sur la variable YIELDS100 car leur coefficient estimé sont toutes significatifs.
+
+######################################################################################
+                   Méthode du Spécifique au général  
+####################################################################################
+
+
+#### Test joint, TEst LM_lag et LM_err et Test RLM_lag et Test RLM_err
+```{r}
+lm.LMtests(MLS,listw=mbcs,test = "SARMA")
+lm.LMtests(MLS,listw=mbcs,test = "LMerr")
+lm.LMtests(MLS,listw=mbcs,test = "LMlag")
+lm.LMtests(MLS,listw=mbcs,test = "RLMerr")
+lm.LMtests(MLS,listw=mbcs,test = "RLMlag")
+```
+
+La probabilité critique du test joint est inférieur au seuil de significativité 5%, on rejette l'hypothèse de nulleté des coefficients ρ et λ. Donc ce modèle est significatif. D'ou la néceesicité d'effectuer les tests LM_lag et LM_err.
+Les résultats du test joint à l’autocorrélation spatiale des erreurs conduisent au rejet de l’hypothèse nulle de l’absence de corrélation entre les effets individuels et les variables explicatives. Nous optons donc dans la suite de l’analyse empirique pour un modèle à effets fixes.
+On peut remarquer que la statistique de test pour une alternative SEM est supérieure à celle correspondant à une alternative SAR.Pour conclure de façon plus crédible, on regarde les tests robustes à la présence dela spécification alternative de l’autocorrélation spatiale.Il s’agit pour le RLMlag de tester l’absence de terme autorégressif spatial. Lorsque le modèle contient déjà un terme autorégressif spatial dans les erreurs (RLMlag), ou inversement pour RLMerr de tester l’absencede terme autorégressif spatial dans les erreurs lorsque le modèle contient un terme autorégressif spatial.
+La version robuste RLMerr est fortement significative  alors que RLMlag ne l’est pas. Nous estimons donc un modèle à effets fixes avec un processus autorégressif spatial dans les erreurs. C'st à dire un modèle SEM.
+
+
+## ESTIMATION DU MODELE SEM
+```{r}
+M_SEM=errorsarlm(MLS,data=shp1,listw = mbcs)
+summary(M_SEM)
+```
+
+##Fonction de vraisemblance du modèle SEM
+$lnL(\beta,\lambda,\sigma_{\epsilon}^2)=-\frac{5}{2}ln(2\pi)-\frac{5}{2}ln(\sigma_{\epsilon}^2) + \ln|I-\lambda W|-\frac{1}{2\sigma_{\epsilon}^2}[(I_-\lambda W)(YIELDS100 - X\beta)]'[(I_-\lambda W)(YIELDS100 - X\beta)]$
+
+$lnL(\beta,\lambda,\sigma_{\epsilon}^2)=-\frac{5}{2}ln(2\pi)-\frac{5}{2}ln(\sigma_{\epsilon}^2) + \ln|I_{5}-0.83544 W|-\frac{1}{2\sigma_{\epsilon}^2}[(I_{5}-0.83544 W)(YIELDS100 - X\beta)]'[(I_{5}-0.83544 W)(YIELDS100 - X\beta)]$
+OU $X= (N,N2,TOP2,TOP3,TOP4)$
+$\beta=(\beta_{1},\beta_{2},\beta_{3},\beta_{4},\beta_{5})' $
+$W=mbcs est la matrice de continguité standardisée 
+
+##Interprétion l’impact d’une variation de la quantité d’engrais, évaluée à la valeur moyenne de l’échantillon, sur le rendement du maïs (attention à la forme fonctionnelle). Cet impact est-il significatif ?
+
+$Impact=\frac{\partial YIELDS100}{\partial N}=\beta_{1}+2\beta_{2} N$
+$\frac{\partial YIELD100}{\partial N}=10.864-0.045292 N$
+
+$w) x_{0}$ and $y_{1}=\left(I_{n}-\lambda W\right) y$
+$w) x_{0}$ and $y_{1}=\left(I_{n}-\lambda W\right) y$
+
+
+
+###########################################################################################
+          Estimation du modèle (1) en ajoutant le décalage spatial
+###########################################################################################
+```{r}
+M_SAR=lagsarlm(YIELDS100~N+N2+TOP2+TOP3+TOP4, data = shp1,listw = mbcs, type="lag",method="eigen" )
+summary(M_SAR)
+```
+
+La coefficient de la variable autorégressif est égale à $\rho=0.68496$. La p_value du test LR est égale à celle du test basé de sur la matrice de variance asymptotique ($=2.22.e{-16} $) et cette probabilité critique est strictement inférieurs au seuil de significativité de 10%, donc on rejjete $H_{0}$ et on conclut que ce coefficient autorégressif est significativement différent de 0. Ceci indique que le rendement de mais d'une pacerelle depend fortement de celui de ces voisins.
+D'après le test de Multiplicateur de Lagrange, on rejette l'hypothèse de nulleté de l'autocorrélation spatiale des résidues car la p_value de ce test est égale à 0.00013297 et cette dernière est inférieure à 0.1. Donc il reste toujours de l'autocorrélation spatiale résiduelle dans les erreurs.Utilisons le test de I Moran pour la confirmer.
+
+```{r}
+moran.test(M_SAR$residuals, listw = mbcs)
+```
+Le test de I Moran a méme confirmé les résultatq su test de multiplicateur de lagrance
+
+
+## b°) Comparaisons les résultats avec ceux du MCO
+L'AIC du modèle SAR est égale à 26060 est inférieur à l'AIC du modèle MCO 26942. D'apràs le critàre de AIC le modèle SAR est préférable à celui du modèle MCO.
+
+
+
+### c°) Quels sont les effets direct et indirect moyens d’une variation de la quantité utilisée d’engrais, évaluée à la valeur moyenne de l’échantillon, sur le rendement du maïs.
+```{r}
+rh_sar=M_SAR$rho
+betarm=M_SAR$coefficients[2]
+## La fonction invIrW calcule l’inverse de (I - rho*W)
+Sw=invIrW(mbcs, rh_sar)*betarm
+ED=diag(Sw)
+EDM=mean(ED)
+```
+
+
+```{r}
+Imp<-impacts(M_SAR,listw=mbcs)
+Imp
+```
+
+```{r}
+m=max(ED)
+m1=round(m,digits=5)
+ED1=as.data.frame(ED)
+ED1$ED=round(ED1$ED,digits = 5)
+Num_parcelle=0
+Num=0
+for(i in 1:nrow(ED1)) {
+  if(isTRUE(ED1[i,]==m)==TRUE){
+    eval(parse(text = sprintf("Num_parcelle=c(Num_parcelle,%d)",i)))
+  } else{
+    
+  }
+}
+Num_parcelle=Num_parcelle[-1]
+parcelle=data.frame(Num_parcelle,m)
+colnames(parcelle)=c("Numero Parcelle","Valeur effet")
+parcelle
+parcelles_max=match(m,ED)
+parcelles_max
+m
+```
+L’effet direct est maximal est égal 13.27355 et elle est dans les parcelles 87, 181, 1534 et 1628 et celui-ci est à. La moyenne des effets directs est égale à 12.43853 et l’effet maximale est égale à 13.27355.
+
+### (e) Au regard des résultats de l’estimation du modèle avec variable endogène spatialement
+#décalée et du modèle avec autocorrélation spatiale des erreurs, quelle spécification préférez-vous ? Justifiez votre réponse
+Le log-likehood pour SEM vaut -12897.09 est plus élevé que pour le modèle SAR -13021.78. Ce qui témoingne une bonne amélioration du modèle SEM sur le modèle SAR. L’AIC vaut 25810 pour SEM, 26060 pour SAR (et 26942 pour LM), ce qui montre que SEM est meilleur que SAR. 
+On conclut l’estimation du modèle autorégressif avec erreurs est plus adéquat pour expliquer l’effet du rendement du maïs sur ces variables explicatives. 
+
+
+```{r}
+pseudo_R2<-function(model) {
+  n=length(model$residuals)
+  as.numeric(1-exp(-(2/n)*(model$LL-model$LLNullLlm)))
+}
+```
+
+```{r}
+pseudo_R2(M_SAR)
+pseudo_R2(M_SEM)
+```
+

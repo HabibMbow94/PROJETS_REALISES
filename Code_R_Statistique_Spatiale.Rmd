@@ -1,0 +1,342 @@
+---
+output:
+  word_document: default
+  html_document: default
+---
+
+title: "PROJET STATISTIQUES AVANCEE ET SPATIALE"
+author: "HABIB MBOW"
+date: "16/02/2020"
+output: "html_document"
+
+```{r}
+library(geoR)
+library(automap)
+library(fields)
+library(gstat)
+library(tidyr)
+library(tidyverse)
+library(sf)
+library(mapview)
+library(readr)
+```
+
+### IMPORTATION DES DONNEES
+```{r}
+base2019 <- read_delim("C:/Users/mbowe/Desktop/M2_MIASHS/statistiqueAvancé/Projet_Avancée/fichier1.txt",   "|", escape_double = FALSE, locale = locale(decimal_mark = ",", grouping_mark = "."), trim_ws = TRUE)
+```
+
+## Création d'une base comptenant les variables Code postale, Code département, Code commune, Code voie et No voie et exportons cette base pour la géocoder.
+```{r}
+Adresse=base2019[,c(12,15,17,19,20)]
+Adressse1=write.csv(Adresse,file ="C:/Users/mbowe/Desktop/M2_MIASHS/statistiqueAvancé/Projet_Avancée/fichier.csv" )
+```
+
+## IMPORTONS La base géocodée et ajoutons la variable valeur foncière dans cette base
+```{r}
+fichier_geocoded <- read_delim("C:/Users/mbowe/Desktop/M2_MIASHS/statistiqueAvancé/Projet_Avancée/fichier.geocoded.csv", ";", escape_double = FALSE, locale = locale(), trim_ws = TRUE)
+fichier=cbind(fichier_geocoded[,7:8],Valeur.fonciere=base2019$`Valeur fonciere`)
+```
+
+# Statistiques descriptive 
+```{r}
+summary(fichier)
+```
+
+## cette fonction permet de voir le nombre et le pourcentage de valeur manquante de chaque variable
+```{r}
+library(funModeling)
+df_status(fichier)
+```
+## On constate qu'il ya 3.52% de valeurs manquantes pour la latitude et la longitude et 1.26% pour la valeur foncière
+
+## Supprimons ces valeurs manquantes 
+```{r}
+base=drop_na(fichier)
+summary(base)
+
+```
+
+
+
+
+#########################################################################################
+                           STATISTIQUE SPATIALE
+#######################################################################################
+
+
+
+##############################################################
+            Analyse Exploratoire du prix des biens
+##############################################################
+
+###Carte du prix de l'immobilier en fonction des coordonnées géographiques( longitude et latitude)
+```{r}
+carte=st_as_sf(base,coords = c('longitude', 'latitude'),crs=4000)
+mapview(carte)
+```
+
+
+### Carte  du prix de l'immobilier en fonction des coordonnées géographiques des 10000 observations
+
+```{r}
+set.seed(84)
+#base1=base[sample(1:nrow(base),"10000"),]
+#carte1=st_as_sf(base1,coords = c('longitude','latitude'),crs=4326)
+#mapview(carte1)
+```
+
+
+
+## Traçons le graphe de champ
+```{r}
+x=base$longitude
+y=base$latitude
+grx<-seq(-62,56)
+gry<-seq(-22,52)
+m<- matrix(base$Valeur.fonciere,nrow=length(grx),ncol=length(gry),byrow=F) #Permet de transformer le vecteur z en une matrice m
+image.plot(grx,gry,m,zlim=c(0,1750000000,100) ,main="Graphe de Champ",asp=1)
+#contour(grx,gry,m,levels=seq(3,36900),add=TRUE)
+#Visualiser le champ
+points(x,y,pch=19)
+```
+
+
+##########################################################################################
+                   ANALYSE VARIOGRAPHIQUE
+#######################################################################################
+
+## Convertir les données en données spatiales
+```{r}
+set.seed(84)
+base2=base[sample(1:nrow(base),"20000"),]
+coordinates(base2) =~longitude+latitude
+class(base2)
+
+
+```
+
+
+#########################################################################################
+                          ETUDE VARIOGRAPHIQUE
+#########################################################################################
+
+
+## choix du variogramme automatique
+```{r}
+autofitvgm = autofitVariogram(Valeur.fonciere~1,base2, model = c("Exp","sph","Gau","Mat"))
+summary(autofitvgm)
+plot(autofitvgm)
+```
+Le modèle de variogramme du choix optimal est le variogramme de Matern de paramètres de portée 0.5717283, de palier 2.027888e+13 et d'effet pépite 3.999094e+13	
+
+
+
+#####################################################################
+                  Prédictions spatiale du prix des biens
+#####################################################################
+
+
+#### Modèle de prédiction Adapté
+###Krigeage avec choix automatique du variogramme
+
+## Avec grille
+```{r}
+grille=expand.grid(grx,gry)
+grille1=as.data.frame(grille)
+colnames(grille1)=c("x","y")
+coords=SpatialPoints(grille1)
+kriging_result = autoKrige(Valeur.fonciere~1,base2,coords,model = "Mat")
+summary(kriging_result)
+plot(kriging_result, sp.layout = list(pts = list("sp.points", base2)))
+```
+
+
+#Interpolons les résultats dans la carte
+
+```{r}
+automapPlot(kriging_result$krige_output, "var1.pred",
+sp.layout = list("sp.points", base2))
+KR=as.data.frame(kriging_result$krige_output)
+KR1=KR[,1:3]
+```
+
+```{r}
+Valeur_predite=st_as_sf(KR1,coords = c('x','y'),crs=4326)
+mapview(Valeur_predite)
+```
+
+
+#########################################################################################
+                            STATISTIQUE AVANCEE
+#########################################################################################
+
+
+######################### Etude descriptives ############################################
+
+# Ajoutons la latitde et la longitude dans la base initiale Base2019
+```{r}
+Newbase=cbind(base2019,fichier[,1:2])
+#describe(Newbase)
+```
+
+```{r}
+df_status(Newbase)
+```
+
+
+Nous remarquons les sept premiers variables ont 100% de valeurs manquantes et d'autres avec plus de 80% de valeurs de valeurs manquantes, du coup on a décidé décidés de supprimer ces variables. Ensuite j'ai enlevé les variables qu'on avait utilisés pour la géocodage.
+IL nous reste à la fin 13 variables et nous ces ariables pour notre étude
+ 
+## Enlevons ces variables
+```{r}
+Newbase1=Newbase[,-c(1:7,12,13:21,24:34,36,38,42)]
+```
+
+
+## Supprimons les valeurs manquantes 
+```{r}
+Newbase2=drop_na(Newbase1)
+```
+
+## Statistiques univariée
+```{r}
+describe(Newbase2)
+```
+
+### Statistique bivariée
+# Corrélation entre les variables quantitatives
+```{r}
+quanti=Newbase2[,c(4,6, 7,9,10,12)]
+mcor=cor(quanti, method = c("pearson", "kendall", "spearman"))
+library(corrplot)
+corrplot(mcor, type="upper", order="hclust", tl.col="black", tl.srt=45)
+```
+
+## Corrélation entre les variables qualitatives
+
+
+```{r}
+library("scatterplot3d")
+scatterplot3d(Newbase2$longitude,Newbase2$latitude,Newbase2$Valeur.fonciere ,type="h", pch=16, box=FALSE)
+```
+
+
+## Estimation du modele de régression linéaire
+```{r}
+RL=lm(`Valeur fonciere`~ `No plan`+`Nombre de lots`+`Surface reelle bati`+`Type local`+`Nature culture`+`Nature mutation`, data = Newbase2)
+Selection=step(RL,direction = "backward")
+summary(Selection)
+```
+
+
+
+ 
+ 
+##Recherche exhaustive
+```{r}
+library(leaps)
+choix=regsubsets(`Valeur fonciere`~+`No plan`+`Nombre de lots`+`Surface reelle bati`+ `Type local`+`Nature mutation`,  int=T,nbest=1, nvmax=11, method="exh", data = Newbase2)
+summary(choix)
+plot(choix,scale="adjr2")
+plot(choix,scale="bic")
+plot(choix,scale="Cp")
+```
+D'après la recherch exaustive nous retenons ces variables 
+
+
+```{r}
+E=rstandard(Selection)
+graphique=data.frame(E,Newbase2[,13:14])
+coordinates(graphique)=~longitude+latitude
+bubble(graphique, "E", col= c ("green","red"),main = "Variogramme des Résidus",
+xlab = "longitude", ylab = "latitude")
+```
+Le modèle MCO ne permet pas d’introduire de structure spatiale sur les résidus.
+##Creation d’un data frame avec les variables retenues et les coordonnées geographiques
+```{r}
+library(tidyverse)
+Newbase4=Newbase2[,c(3,4,6,7,8,9,11,13,14)]
+summary(Newbase3)
+```
+
+##Chargement des packages utiles
+```{r}
+
+library(foreign)
+library(rgdal)
+library(sp)
+library(rgdal)
+library(rgeos)
+library(mapproj)
+library(maptools)
+library(raster)
+library(spdep)
+library(spatialreg)
+
+```
+
+
+
+
+
+```{r}
+coordinates(Newbase4)= ~longitude+latitude
+class(Newbase4)
+#is.projected(Newbase3) # see if a projection is defined  
+```
+
+```{r}
+proj4string(Newbase4) <- CRS("+init=epsg:4326") # this is WGS84
+is.projected(Newbase4) 
+```
+
+```{r}
+library(rgdal)
+
+# note that we need to save the philly_homicides_df, which we converted to sp object!
+writeOGR(Newbase4, "C:/Users/mbowe/Desktop/M2_MIASHS/statistiqueAvancé/Projet_Avancée", "Newbase4", driver = "ESRI Shapefile")
+# to force save:
+writeOGR(Newbase4, "C:/Users/mbowe/Desktop/M2_MIASHS/statistiqueAvancé/Projet_Avancée", "Newbase4", driver = "ESRI Shapefile", overwrite_layer = TRUE)
+```
+
+```{r}
+shp=readOGR("Newbase4.shp",layer="Newbase4")
+class(shp)
+```
+# Division la base et calculons la matrice des cinq plus proches voisins
+```{r}
+library(spdep)
+shp1=shp[sample(1:nrow(shp),20000),] 
+coords=coordinates(shp1)
+knn5<-knearneigh(coords, k=5)
+nb_5<-knn2nb(knn5)
+W5<-nb2listw(nb_5,style="W") ##Assignation d’une pondération entre voisins
+
+```
+#############################################################################################
+                      MODELISATION SPATIALE
+#############################################################################################
+```{r}
+head(shp1)
+```
+
+```{r}
+fm.lm=`Vlrfncr`~`No.plan`+`Nmbrdlt`+`Srfcrlb`+ `Typlocl`+`Ntrcltr`+`Ntrmttn`
+MLS=lm(fm.lm,data = shp1)
+summary(MLS)
+```
+
+METHODE DU SPECIFIQUE AU GENERAL
+#### Test joint, TEst LM_lag et LM_err et Test RLM_lag et Test RLM_err
+```{r}
+lm.LMtests(MLS,listw=W5,test =c("SARMA","LMlag","LMerr","RLMerr","RLMlag")  )
+```
+
+```{r}
+M_SAR=lagsarlm(MLS,data=shp1,listw = W5,type="lag",method="eigen")
+summary(M_SAR)
+```
+
+
+## 
